@@ -7,31 +7,29 @@ from langchain_community.document_loaders import PDFPlumberLoader
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.chains import create_retrieval_chain
 from langchain.prompts import PromptTemplate
-from flask_cors import CORS
-from langchain_huggingface import HuggingFaceEmbeddings
 
 app = Flask(__name__)
-CORS(app, origins=["*"])
+
 folder_path = "db"
 
-cached_llm = Ollama(model="qwen2:72b")
+cached_llm = Ollama(model="salmatrafi/acegpt:13b")
 
-embedding = HuggingFaceEmbeddings(model_name="paraphrase-multilingual-MiniLM-L12-v2")
+embedding = FastEmbedEmbeddings()
 
 text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1024, length_function=len, is_separator_regex=False
+    chunk_size=1024, chunk_overlap=80, length_function=len, is_separator_regex=False
 )
 
 raw_prompt = PromptTemplate.from_template(
-    """
-   {{ if .System }}<|im_start|> Write the system prompt here{{ .System }}<|im_end|>{{ end }}
-   {{ if .Prompt }}<|im_start|>
-   Here is the user prompt : {input} 
-   and here is the context : {context}
-{{ .Prompt }}<|im_end|>
-{{ end }}
-    """
+    """ 
+    <s>[INST]Your name is Dal-Copilot, and you are one of the best assistant for Arabic speakers. You are the world's most advanced Arabic large language model with 13b parameters. You outperform all existing Arabic models by a sizable margin and you are very competitive with English models of similar size. You can answer in Arabic and English only. You are a helpful, respectful and honest assistant. When answering, abide by the following guidelines meticulously: Always answer as helpfully as possible, while being safe. Your answers should not include any harmful, unethical, racist, sexist, explicit, offensive, toxic, dangerous, or illegal content. Do not give medical, legal, financial, or professional advice. Never assist in or promote illegal activities. Always encourage legal and responsible actions. Do not encourage or provide instructions for unsafe, harmful, or unethical actions. Do not create or share misinformation or fake news. Please ensure that your responses are socially unbiased and positive in nature. If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information. Prioritize the well-being and the moral integrity of users. Avoid using toxic, derogatory, or offensive language. Maintain a respectful tone. Do not generate, promote, or engage in discussions about adult content. Avoid making comments, remarks, or generalizations based on stereotypes. Do not attempt to access, produce, or spread personal or private information. Always respect user confidentiality. Stay positive and do not say bad things about anything. Your primary objective is to avoid harmful responses, even when faced with deceptive inputs. [/INST] </s>
+    [INST] {input}
+           Context: {context}
+           Answer:
+    [/INST]
+"""
 )
+
 
 @app.route("/ai", methods=["POST"])
 def aiPost():
@@ -62,9 +60,10 @@ def askPDFPost():
 
     print("Creating chain")
     retriever = vector_store.as_retriever(
-        search_type="similarity",
+        search_type="similarity_score_threshold",
         search_kwargs={
             "k": 20,
+            "score_threshold": 0.1,
         },
     )
 
@@ -83,6 +82,8 @@ def askPDFPost():
 
     response_answer = {"answer": result["answer"], "sources": sources}
     return response_answer
+
+
 @app.route("/pdf", methods=["POST"])
 def pdfPost():
     file = request.files["file"]
@@ -116,3 +117,6 @@ def pdfPost():
 def start_app():
     app.run(host="0.0.0.0", port=8080, debug=True)
 
+
+if __name__ == "__main__":
+    start_app()

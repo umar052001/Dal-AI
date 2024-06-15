@@ -12,29 +12,43 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 app = Flask(__name__)
 CORS(app, origins=["*"])
-folder_path = "db"
 
-cached_llm = Ollama(model="qwen2:72b")
+# Define constants
+FOLDER_PATH = "db"
+MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 
-embedding = HuggingFaceEmbeddings(model_name="paraphrase-multilingual-MiniLM-L12-v2")
+# Initialize the LLM with the Qwen2 model
+cached_llm = Ollama(model="qwen2:72b-instruct")
 
+# Initialize the embedding model
+embedding = HuggingFaceEmbeddings(model_name=MODEL_NAME)
+
+# Define text splitter for document chunking
 text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1024, length_function=len, is_separator_regex=False
+    chunk_size=1024,
+    length_function=len,
+    is_separator_regex=False
 )
 
+# Define the prompt template
 raw_prompt = PromptTemplate.from_template(
     """
-   {{ if .System }}<|im_start|> Write the system prompt here{{ .System }}<|im_end|>{{ end }}
-   {{ if .Prompt }}<|im_start|>
-   Here is the user prompt : {input} 
-   and here is the context : {context}
-{{ .Prompt }}<|im_end|>
-{{ end }}
+    {%- if System -%}
+    {{ System }}
+    {%- endif -%}
+    {%- if Prompt -%}
+    User's input: {input}
+    Context: {context}
+    {{ Prompt }}
+    {%- endif -%}
     """
 )
 
 @app.route("/ai", methods=["POST"])
-def aiPost():
+def ai_post():
+    """
+    Endpoint to handle simple chat requests.
+    """
     print("Post /ai called")
     json_content = request.json
     query = json_content.get("query")
@@ -48,9 +62,11 @@ def aiPost():
     response_answer = {"answer": response}
     return response_answer
 
-
 @app.route("/ask_pdf", methods=["POST"])
-def askPDFPost():
+def ask_pdf_post():
+    """
+    Endpoint to handle questions related to PDF documents using RAG.
+    """
     print("Post /ask_pdf called")
     json_content = request.json
     query = json_content.get("query")
@@ -58,14 +74,13 @@ def askPDFPost():
     print(f"query: {query}")
 
     print("Loading vector store")
-    vector_store = Chroma(persist_directory=folder_path, embedding_function=embedding)
+    vector_store = Chroma(persist_directory=FOLDER_PATH, embedding_function=embedding)
 
     print("Creating chain")
     retriever = vector_store.as_retriever(
-        search_type="similarity",
-        search_kwargs={
-            "k": 20,
-        },
+        search_type="similarity_score_threshold",
+        search_kwargs={"k": 20,"score_threshold": 0.0,},
+        
     )
 
     document_chain = create_stuff_documents_chain(cached_llm, raw_prompt)
@@ -75,19 +90,19 @@ def askPDFPost():
 
     print(result)
 
-    sources = []
-    for doc in result["context"]:
-        sources.append(
-            {"source": doc.metadata["source"], "page_content": doc.page_content}
-        )
+    sources = [{"source": doc.metadata["source"], "page_content": doc.page_content} for doc in result["context"]]
 
     response_answer = {"answer": result["answer"], "sources": sources}
     return response_answer
+
 @app.route("/pdf", methods=["POST"])
-def pdfPost():
+def pdf_post():
+    """
+    Endpoint to handle PDF uploads, process and store embeddings.
+    """
     file = request.files["file"]
     file_name = file.filename
-    save_file = "pdf/" + file_name
+    save_file = f"pdf/{file_name}"
     file.save(save_file)
     print(f"filename: {file_name}")
 
@@ -99,7 +114,7 @@ def pdfPost():
     print(f"chunks len={len(chunks)}")
 
     vector_store = Chroma.from_documents(
-        documents=chunks, embedding=embedding, persist_directory=folder_path
+        documents=chunks, embedding=embedding, persist_directory=FOLDER_PATH
     )
 
     vector_store.persist()
@@ -112,7 +127,11 @@ def pdfPost():
     }
     return response
 
-
 def start_app():
+    """
+    Start the Flask application.
+    """
     app.run(host="0.0.0.0", port=8080, debug=True)
 
+if __name__ == "__main__":
+    start_app()
